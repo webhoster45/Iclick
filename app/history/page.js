@@ -15,13 +15,15 @@ const formatNumber = (value, decimals = 4) => {
 export default function HistoryPage() {
   const { login, authenticated } = usePrivy();
   const { wallets } = useWallets();
+  const activeWallet =
+    wallets?.find((wallet) => wallet.walletClientType === "metamask") || wallets?.[0];
 
   const [trades, setTrades] = useState([]);
   const [alphaLinks, setAlphaLinks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const walletAddress = wallets?.[0]?.address;
+  const walletAddress = activeWallet?.address;
   const injAddress = walletAddress ? toInjAddress(walletAddress) : "";
 
   useEffect(() => {

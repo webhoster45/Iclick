@@ -9,12 +9,12 @@ const normalizeMarket = (value) => {
   return value.trim().toLowerCase().replace(/\s+/g, "").replace("/", "_");
 };
 
-const formatAddress = (address) => {
-  if (!address) return "";
-  const start = address.slice(0, 6);
-  const end = address.slice(-4);
-  return `${start}...${end}`;
-};
+  const formatAddress = (address) => {
+    if (!address) return "";
+    const start = address.slice(0, 6);
+    const end = address.slice(-4);
+    return `${start}...${end}`;
+  };
 
 const buildAlphaLink = (base, market, side, amount) => {
   const normalizedMarket = normalizeMarket(market);
@@ -35,6 +35,8 @@ const buildAlphaLink = (base, market, side, amount) => {
 export default function Homepage() {
   const { login, logout, authenticated } = usePrivy();
   const { wallets } = useWallets();
+  const activeWallet =
+    wallets?.find((wallet) => wallet.walletClientType === "metamask") || wallets?.[0];
 
   const [marketInput, setMarketInput] = useState("INJ/USDC");
   const [sideInput, setSideInput] = useState("buy");
@@ -44,7 +46,7 @@ export default function Homepage() {
   const [baseUrl, setBaseUrl] = useState("http://localhost:3000");
 
   const copyTimeoutRef = useRef(null);
-  const walletAddress = authenticated && wallets[0] ? wallets[0].address : "";
+  const walletAddress = authenticated && activeWallet ? activeWallet.address : "";
 
   const alphaLink = useMemo(
     () => buildAlphaLink(baseUrl, marketInput, sideInput, amountInput),
@@ -296,6 +298,10 @@ export default function Homepage() {
         <a className="flex flex-col items-center justify-center text-neutral-400 dark:text-neutral-600" href="#">
           <span className="material-symbols-outlined" data-icon="auto_awesome">auto_awesome</span>
           <span className="font-['Inter'] text-[10px] uppercase tracking-widest font-bold">Alpha</span>
+        </a>
+        <a className="flex flex-col items-center justify-center text-neutral-400 dark:text-neutral-600" href="/history">
+          <span className="material-symbols-outlined" data-icon="history">history</span>
+          <span className="font-['Inter'] text-[10px] uppercase tracking-widest font-bold">History</span>
         </a>
         <a className="flex flex-col items-center justify-center text-neutral-400 dark:text-neutral-600" href="#">
           <span className="material-symbols-outlined" data-icon="account_balance_wallet">account_balance_wallet</span>

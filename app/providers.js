@@ -1,4 +1,5 @@
 'use client';
+import { Children, cloneElement, isValidElement } from 'react';
 import { PrivyProvider } from '@privy-io/react-auth';
 
 export default function Providers({ children }) {
@@ -10,14 +11,18 @@ export default function Providers({ children }) {
         appearance: {
           theme: 'dark',
           accentColor: '#00C2FF',
-          logo: '/logo.png',
         },
         embeddedWallets: {
           createOnLogin: 'users-without-wallets',
         },
       }}
     >
-      {children}
+      {Children.map(children, (child, index) => {
+        if (isValidElement(child)) {
+          return cloneElement(child, { key: child.key ?? index });
+        }
+        return child;
+      })}
     </PrivyProvider>
   );
 }

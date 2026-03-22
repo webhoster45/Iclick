@@ -5,17 +5,59 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { getMarket, MARKETS } from "@/lib/markets";
-import { toInjAddress, getBestPrice, getLastTradePrice, buildMarketOrderMsg, broadcastEip712, fetchSpotMarketBySlug } from "@/lib/injective";
+import { toInjAddress, buildSubaccountId, getBestPrice, getLastTradePrice, buildMarketOrderMsg, broadcastEip712, fetchSpotMarketBySlug } from "@/lib/injective";
 
 const formatAddress = (address) => {
   if (!address) return "";
-  return `${address.slice(0, 8)}...${address.slice(-6)}`;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+};
+
+const EVM_CHAIN_ID = Number.parseInt(process.env.NEXT_PUBLIC_EVM_CHAIN_ID || "", 10) || 1439;
+const EVM_CHAIN_ID_HEX = `0x${EVM_CHAIN_ID.toString(16)}`;
+const INJECTIVE_EVM_PARAMS = {
+  chainId: EVM_CHAIN_ID_HEX,
+  chainName: "Injective EVM Testnet",
+  nativeCurrency: {
+    name: "INJ",
+    symbol: "INJ",
+    decimals: 18,
+  },
+  rpcUrls: ["https://k8s.testnet.json-rpc.injective.network/"],
+  blockExplorerUrls: ["https://testnet.blockscout.injective.network/blocks"],
+};
+
+const ensureInjectiveEvmNetwork = async (provider) => {
+  if (!provider?.request) return;
+  const current = await provider.request({ method: "eth_chainId" });
+  if (current === EVM_CHAIN_ID_HEX) return;
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: EVM_CHAIN_ID_HEX }],
+    });
+  } catch (err) {
+    if (err?.code === 4902) {
+      await provider.request({
+        method: "wallet_addEthereumChain",
+        params: [INJECTIVE_EVM_PARAMS],
+      });
+      await provider.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: EVM_CHAIN_ID_HEX }],
+      });
+      return;
+    }
+    throw err;
+  }
 };
 
 export default function AlphaPage() {
   const searchParams = useSearchParams();
   const { login, authenticated, ready } = usePrivy();
   const { wallets } = useWallets();
+  const [selectedWalletAddress, setSelectedWalletAddress] = useState("");
+  const activeWallet =
+    wallets?.find((wallet) => wallet.address === selectedWalletAddress) || wallets?.[0];
 
   const slug = searchParams.get("m");
   const side = searchParams.get("s");
@@ -28,6 +70,9 @@ export default function AlphaPage() {
   const [priceSource, setPriceSource] = useState("orderbook");
   const [manualPrice, setManualPrice] = useState("");
   const [priceRetrying, setPriceRetrying] = useState(false);
+  const [addressCopied, setAddressCopied] = useState(false);
+  const [showInjectiveAddress, setShowInjectiveAddress] = useState(false);
+  const [debugInfo, setDebugInfo] = useState(null);
 
   const normalizeSlug = (value) => {
     if (!value) return "";
@@ -97,6 +142,14 @@ export default function AlphaPage() {
   }, [slug]);
 
   useEffect(() => {
+    if (!wallets?.length) {
+      setSelectedWalletAddress("");
+      return;
+    }
+    setSelectedWalletAddress((current) => current || wallets[0].address);
+  }, [wallets]);
+
+  useEffect(() => {
     if (!isValidMarketId(market?.marketId) || !normalizedSide) return;
     getBestPrice(market.marketId, normalizedSide)
       .then(async (value) => {
@@ -163,16 +216,46 @@ export default function AlphaPage() {
         return;
       }
 
-      if (!authenticated || !wallets.length) {
+      if (!authenticated || !activeWallet) {
         await login();
         setStatus("idle");
         return;
       }
 
-      const wallet = wallets[0];
-      const evmAddress = wallet.address;
+      const wallet = activeWallet;
+      const provider = await wallet.getEthereumProvider();
+      try {
+        await ensureInjectiveEvmNetwork(provider);
+        const chainIdHex = await provider.request({ method: "eth_chainId" });
+        if (chainIdHex !== EVM_CHAIN_ID_HEX) {
+          setError(`Please switch your wallet to Injective EVM Testnet (chainId ${EVM_CHAIN_ID}).`);
+          setStatus("error");
+          return;
+        }
+      } catch (err) {
+        setError("Please switch your wallet to Injective EVM Testnet (chainId 1439) and try again.");
+        setStatus("error");
+        return;
+      }
+      let evmAddress = wallet.address;
+      try {
+        const accounts = await provider.request({ method: "eth_requestAccounts" });
+        if (Array.isArray(accounts) && accounts[0]) {
+          evmAddress = accounts[0];
+        }
+      } catch {
+        // If provider doesn't expose accounts, fall back to wallet address.
+      }
       const injectiveAddress = toInjAddress(evmAddress);
-      const subaccountId = `${evmAddress.toLowerCase().replace("0x", "").padStart(64, "0")}0000000000000000`;
+      const subaccountId = buildSubaccountId(evmAddress);
+      const activeChainIdHex = await provider.request({ method: "eth_chainId" });
+      setDebugInfo({
+        evmAddress,
+        injectiveAddress,
+        subaccountId,
+        chainIdHex: activeChainIdHex,
+        expectedChainIdHex: EVM_CHAIN_ID_HEX,
+      });
 
       let livePrice = await getBestPrice(market.marketId, normalizedSide);
       if (!livePrice) {
@@ -205,7 +288,7 @@ export default function AlphaPage() {
         msgs: [msg],
         injectiveAddress,
         ethereumAddress: evmAddress,
-        provider: await wallet.getEthereumProvider(),
+        provider,
       });
 
       setTxHash(response.txHash);
@@ -260,11 +343,23 @@ export default function AlphaPage() {
     );
   }
 
-  const authenticatedWallet = wallets?.[0];
-  const displayAddress = authenticatedWallet
-    ? toInjAddress(authenticatedWallet.address)
-    : "Not Connected";
+  const authenticatedWallet = activeWallet;
+  const evmAddress = authenticatedWallet?.address || "Not Connected";
+  const injAddress = authenticatedWallet ? toInjAddress(authenticatedWallet.address) : "Not Connected";
+  const displayAddress = showInjectiveAddress ? injAddress : evmAddress;
   const shortAddress = displayAddress !== "Not Connected" ? formatAddress(displayAddress) : "Not connected";
+  const showWalletSwitcher = authenticated && wallets?.length > 1;
+
+  const handleCopyAddress = async () => {
+    if (!displayAddress || displayAddress === "Not Connected") return;
+    try {
+      await navigator.clipboard.writeText(displayAddress);
+      setAddressCopied(true);
+      setTimeout(() => setAddressCopied(false), 1500);
+    } catch (err) {
+      console.error("Copy failed", err);
+    }
+  };
 
   return (
     <div className="bg-surface text-on-background min-h-screen flex flex-col">
@@ -403,9 +498,42 @@ export default function AlphaPage() {
                       {authenticated ? shortAddress : "Wallet not connected"}
                     </span>
                   </div>
-                  <span className="text-[10px] font-bold tracking-widest text-primary uppercase">
-                    {authenticated ? "Connected" : "Click to Connect"}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    {showWalletSwitcher && (
+                      <select
+                        className="text-[10px] uppercase tracking-widest text-on-surface-variant bg-surface-container-high rounded-full px-2 py-1"
+                        value={selectedWalletAddress}
+                        onChange={(event) => setSelectedWalletAddress(event.target.value)}
+                        aria-label="Select wallet"
+                      >
+                      {wallets.map((wallet, index) => (
+                          <option key={wallet.address || wallet.walletClientType || index} value={wallet.address}>
+                            {formatAddress(wallet.address)} {wallet.walletClientType ? `(${wallet.walletClientType})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <button
+                      className="material-symbols-outlined text-primary text-sm"
+                      type="button"
+                      onClick={handleCopyAddress}
+                      disabled={!authenticated}
+                      aria-label="Copy address"
+                    >
+                      {addressCopied ? "check" : "content_copy"}
+                    </button>
+                    <button
+                      className="text-[9px] font-bold tracking-widest text-primary uppercase border border-outline-variant/40 rounded-full px-2 py-1"
+                      type="button"
+                      onClick={() => setShowInjectiveAddress((prev) => !prev)}
+                      disabled={!authenticated}
+                    >
+                      {showInjectiveAddress ? "Show 0x" : "Show inj"}
+                    </button>
+                    <span className="text-[9px] font-bold tracking-widest text-primary uppercase">
+                      {authenticated ? "Connected" : "Click to Connect"}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="p-10 pt-6">
@@ -426,7 +554,29 @@ export default function AlphaPage() {
                       </>
                     )}
                   </button>
-                  {error && <p className="text-error text-[10px] font-bold mt-4 tracking-widest uppercase text-center">{error}</p>}
+                  {error && (
+                    <div className="mt-4 text-center">
+                      <p className="text-error text-[10px] font-bold tracking-widest uppercase">{error}</p>
+                      {error.includes("Wallet not initialized") && (
+                        <div className="mt-3 text-[10px] text-on-surface-variant">
+                          Fund this Injective address and do one small transaction to register the pubkey:
+                          <div className="mt-2 font-mono text-[10px] break-all">{injAddress}</div>
+                        </div>
+                      )}
+                      {error.includes("Unauthorized") && debugInfo && (
+                        <div className="mt-4 text-[10px] text-on-surface-variant text-left space-y-2">
+                          <div className="font-bold uppercase tracking-widest text-[9px]">Debug Info</div>
+                          <div className="font-mono break-all">EVM: {debugInfo.evmAddress}</div>
+                          <div className="font-mono break-all">inj: {debugInfo.injectiveAddress}</div>
+                          <div className="font-mono break-all">Subaccount: {debugInfo.subaccountId}</div>
+                          <div className="font-mono">Chain: {debugInfo.chainIdHex} (expected {debugInfo.expectedChainIdHex})</div>
+                          <div className="text-[9px] uppercase tracking-widest">
+                            If these don’t match the wallet you funded, disconnect and reconnect the right wallet.
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <p className="text-center mt-6 text-[10px] text-on-surface-variant/60 font-medium tracking-wide">
                     By confirming, you agree to our Protocol Terms of Service.
                   </p>

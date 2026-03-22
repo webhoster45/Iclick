@@ -40,13 +40,15 @@ const formatAmount = (value, decimals = 6) => {
 export default function PortfolioPage() {
   const { login, authenticated } = usePrivy();
   const { wallets } = useWallets();
+  const activeWallet =
+    wallets?.find((wallet) => wallet.walletClientType === "metamask") || wallets?.[0];
 
   const [portfolio, setPortfolio] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const denomMeta = useMemo(() => buildDenomMeta(), []);
-  const walletAddress = wallets?.[0]?.address;
+  const walletAddress = activeWallet?.address;
   const injAddress = walletAddress ? toInjAddress(walletAddress) : "";
 
   useEffect(() => {
@@ -215,8 +217,8 @@ export default function PortfolioPage() {
                 <p className="text-on-primary/70 text-sm mb-6">Connected account overview.</p>
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Injective Address</span>
-                    <span className="text-sm font-semibold">{injAddress || "-"}</span>
+                    <span className="text-sm font-medium">Wallet Address</span>
+                    <span className="text-sm font-semibold">{walletAddress || "-"}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Balances</span>

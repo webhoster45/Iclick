@@ -39,6 +39,7 @@ C:\Program Files\nodejs\npm.cmd install
 2. Create `.env.local`
 ```
 NEXT_PUBLIC_PRIVY_APP_ID=your_privy_app_id
+NEXT_PUBLIC_EVM_CHAIN_ID=1439
 ```
 3. Run dev server
 ```
@@ -75,11 +76,28 @@ This keeps demos and hackathon flows working even when the testnet has no liquid
 ---
 
 **Wallet Chain ID Note (Why You Saw chainId Errors)**
-If you see: `Provided chainId "5" must match the active chainId "1"`, it means:
-- Your wallet is on Mainnet (`1`)
-- The app previously assumed Goerli (`5`)
+Injective spot orders sign on the **Injective EVM Testnet**. If your wallet is on Ethereum Mainnet (`1`), the signer will reject the EIP-712 payload.
 
-We now **detect the wallet’s chainId automatically** before signing, so it should match whatever network the wallet is using.
+The app now tries to switch you to Injective EVM Testnet automatically. You can also set:
+```
+NEXT_PUBLIC_EVM_CHAIN_ID=1439
+```
+Network parameters used for MetaMask auto-switch:
+- Chain ID: 1439
+- RPC: https://k8s.testnet.json-rpc.injective.network/
+- Explorer: https://testnet.blockscout.injective.network/blocks
+
+---
+
+**Wallet Initialization + Testnet Funds**
+If you see an error like:
+`Wallet not initialized on Injective...`
+
+That means the Injective account has never signed a transaction before, so the public key is not registered on-chain yet. To fix:
+1. Fund the Injective address with **testnet INJ**.
+2. Perform any small on-chain action once (a trade or transfer).
+
+Also note: **you need USDC** (or the quote asset) in your Injective testnet wallet to place a buy, plus **INJ** to pay gas.
 
 ---
 
@@ -131,6 +149,9 @@ We now **detect the wallet’s chainId automatically** before signing, so it sho
 
 - Orderbook empty
   - Use the last-trade fallback or enter a manual price.
+
+- Wallet not initialized
+  - Fund with testnet INJ and complete one transaction.
 
 - Turbopack warning
   - This project uses Webpack. The `dev` script already forces `next dev --webpack`.
