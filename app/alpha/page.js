@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
@@ -51,7 +51,7 @@ const ensureInjectiveEvmNetwork = async (provider) => {
   }
 };
 
-export default function AlphaPage() {
+function AlphaPageContent() {
   const searchParams = useSearchParams();
   const { login, authenticated, ready } = usePrivy();
   const { wallets } = useWallets();
@@ -616,5 +616,13 @@ export default function AlphaPage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function AlphaPage() {
+  return (
+    <Suspense fallback={null}>
+      <AlphaPageContent />
+    </Suspense>
   );
 }
